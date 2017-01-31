@@ -25,3 +25,11 @@ for the specific models that support Encoding and Decoding.
 
 [1]: https://developer.nvidia.com/nvidia-video-codec-sdk
 [2]: http://developer.nvidia.com/cuda/cuda-toolkit
+
+## Usage
+
+Since CUDA provides an older version of the cuvid headers make sure to always give priority to the Video SDK headers, e.g.:
+
+```
+CPPFLAGS="-I/opt/nvidia-video-sdk/include -I/opt/cuda/include"
+```
