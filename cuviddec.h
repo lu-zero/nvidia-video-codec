@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this header file only:
  *
- * Copyright (c) 2010-2016 NVIDIA Corporation
+ * Copyright (c) 2010-2017 NVIDIA Corporation
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -39,7 +39,7 @@
 #include <cuda.h>
 #endif // __dynlink_cuda_h__
 
-#if defined(__x86_64) || defined(AMD64) || defined(_M_AMD64)
+#if defined(_WIN64) || defined(__LP64__) || defined(__x86_64) || defined(AMD64) || defined(_M_AMD64)
 #if (CUDA_VERSION >= 3020) && (!defined(CUDA_FORCE_API_VERSION) || (CUDA_FORCE_API_VERSION >= 3020))
 #define __CUVID_DEVPTR64
 #endif
@@ -73,7 +73,7 @@ typedef enum cudaVideoCodec_enum {
     cudaVideoCodec_HEVC,                    /**<  HEVC   */
     cudaVideoCodec_VP8,                     /**<  VP8   */
     cudaVideoCodec_VP9,                     /**<  VP9   */
-    cudaVideoCodec_NumCodecs,               /**<  Max COdecs   */
+    cudaVideoCodec_NumCodecs,               /**<  Max codecs   */
     // Uncompressed YUV
     cudaVideoCodec_YUV420 = (('I'<<24)|('Y'<<16)|('U'<<8)|('V')),   /**< Y,U,V (4:2:0)  */
     cudaVideoCodec_YV12   = (('Y'<<24)|('V'<<16)|('1'<<8)|('2')),   /**< Y,V,U (4:2:0)  */
@@ -87,7 +87,9 @@ typedef enum cudaVideoCodec_enum {
  * Video Surface Formats Enums
  */
 typedef enum cudaVideoSurfaceFormat_enum {
-    cudaVideoSurfaceFormat_NV12=0       /**< NV12 (currently the only supported output format)  */
+    cudaVideoSurfaceFormat_NV12=0,       /**< NV12 format          */
+    cudaVideoSurfaceFormat_P016=1        /**< 16 bit semiplaner format. Can be used for 10 bit(6LSB bits 0),
+                                                                                        12 bit (4LSB bits 0) */
 } cudaVideoSurfaceFormat;
 
 /*!
@@ -122,22 +124,51 @@ typedef enum cudaVideoCreateFlags_enum {
     cudaVideoCreate_PreferCUVID = 0x04  /**< Use dedicated video engines directly */
 } cudaVideoCreateFlags;
 
+
+/*!
+ * \struct CUVIDDECODECAPS;
+ * This structure is used in cuvidGetDecoderCaps API
+ */
+typedef struct _CUVIDDECODECAPS
+{
+    cudaVideoCodec          eCodecType;                 /**< IN: cudaVideoCodec_XXX                                 */
+    cudaVideoChromaFormat   eChromaFormat;              /**< IN: cudaVideoChromaFormat_XXX                          */
+    unsigned int            nBitDepthMinus8;            /**< IN: The Value "BitDepth minus 8"                       */
+    unsigned int            reserved1[3];               /**< Reserved for future use - set to zero                  */
+
+    unsigned char           bIsSupported;               /**< OUT: 1 if codec supported, 0 if not supported          */
+    unsigned char           reserved2[3];               /**< Reserved for future use - set to zero                  */
+    unsigned int            nMaxWidth;                  /**< OUT: Max supported coded width in pixels               */
+    unsigned int            nMaxHeight;                 /**< OUT: Max supported coded height in pixels              */
+    unsigned int            nMaxMBCount;                /**< OUT: Max supported macroblock count
+                                                                  CodedWidth*CodedHeight/256 must be <= nMaxMBCount */
+    unsigned short          nMinWidth;                  /**< OUT: Min supported coded width in pixels               */
+    unsigned short          nMinHeight;                 /**< OUT: Min supported coded height in pixels              */
+    unsigned int            reserved3[11];              /**< Reserved for future use - set to zero                  */
+} CUVIDDECODECAPS;
+
 /*!
  * \struct CUVIDDECODECREATEINFO
  * Struct used in create decoder
  */
 typedef struct _CUVIDDECODECREATEINFO
 {
-    unsigned long ulWidth;              /**< Coded Sequence Width */
-    unsigned long ulHeight;             /**< Coded Sequence Height */
-    unsigned long ulNumDecodeSurfaces;  /**< Maximum number of internal decode surfaces */
-    cudaVideoCodec CodecType;           /**< cudaVideoCodec_XXX */
-    cudaVideoChromaFormat ChromaFormat; /**< cudaVideoChromaFormat_XXX (only 4:2:0 is currently supported) */
-    unsigned long ulCreationFlags;      /**< Decoder creation flags (cudaVideoCreateFlags_XXX) */
-    unsigned long bitDepthMinus8;
-    unsigned long Reserved1[4];         /**< Reserved for future use - set to zero */
+    unsigned long ulWidth;              /**< IN: Coded sequence width in pixels                                             */
+    unsigned long ulHeight;             /**< IN: Coded sequence height in pixels                                            */
+    unsigned long ulNumDecodeSurfaces;  /**< IN: Maximum number of internal decode surfaces                                 */
+    cudaVideoCodec CodecType;           /**< IN: cudaVideoCodec_XXX                                                         */
+    cudaVideoChromaFormat ChromaFormat; /**< IN: cudaVideoChromaFormat_XXX                                                  */
+    unsigned long ulCreationFlags;      /**< IN: Decoder creation flags (cudaVideoCreateFlags_XXX)                          */
+    unsigned long bitDepthMinus8;       /**< IN: The value "BitDepth minus 8"                                               */
+    unsigned long ulIntraDecodeOnly;    /**< IN: Set 1 only if video has all intra frames (default value is 0). This will
+                                             optimize video memory for Intra frames only decoding. The support is limited
+                                             to specific codecs(H264 rightnow), the flag will be ignored for codecs which
+                                             are not supported. However decoding might fail if the flag is enabled in case
+                                             of supported codecs for regular bit streams having P and/or B frames.          */
+    unsigned long Reserved1[3];         /**< Reserved for future use - set to zero                                          */
+
     /**
-    * area of the frame that should be displayed
+    * IN: area of the frame that should be displayed
     */
     struct {
         short left;
@@ -146,14 +177,16 @@ typedef struct _CUVIDDECODECREATEINFO
         short bottom;
     } display_area;
 
-    cudaVideoSurfaceFormat OutputFormat;       /**< cudaVideoSurfaceFormat_XXX */
-    cudaVideoDeinterlaceMode DeinterlaceMode;  /**< cudaVideoDeinterlaceMode_XXX */
-    unsigned long ulTargetWidth;               /**< Post-processed Output Width (Should be aligned to 2) */
-    unsigned long ulTargetHeight;              /**< Post-processed Output Height (Should be aligbed to 2) */
-    unsigned long ulNumOutputSurfaces;         /**< Maximum number of output surfaces simultaneously mapped */
-    CUvideoctxlock vidLock;                    /**< If non-NULL, context lock used for synchronizing ownership of the cuda context */
+    cudaVideoSurfaceFormat OutputFormat;       /**< IN: cudaVideoSurfaceFormat_XXX                                     */
+    cudaVideoDeinterlaceMode DeinterlaceMode;  /**< IN: cudaVideoDeinterlaceMode_XXX                                   */
+    unsigned long ulTargetWidth;               /**< IN: Post-processed output width (Should be aligned to 2)           */
+    unsigned long ulTargetHeight;              /**< IN: Post-processed output height (Should be aligbed to 2)          */
+    unsigned long ulNumOutputSurfaces;         /**< IN: Maximum number of output surfaces simultaneously mapped        */
+    CUvideoctxlock vidLock;                    /**< IN: If non-NULL, context lock used for synchronizing ownership of
+                                                    the cuda context. Needed for cudaVideoCreate_PreferCUDA decode     */
+
     /**
-    * target rectangle in the output frame (for aspect ratio conversion)
+    * IN: target rectangle in the output frame (for aspect ratio conversion)
     * if a null rectangle is specified, {0,0,ulTargetWidth,ulTargetHeight} will be used
     */
     struct {
@@ -185,14 +218,14 @@ typedef struct _CUVIDH264DPBENTRY
  */
 typedef struct _CUVIDH264MVCEXT
 {
-    int num_views_minus1;
-    int view_id;
-    unsigned char inter_view_flag;
-    unsigned char num_inter_view_refs_l0;
-    unsigned char num_inter_view_refs_l1;
-    unsigned char MVCReserved8Bits;
-    int InterViewRefsL0[16];
-    int InterViewRefsL1[16];
+    int num_views_minus1;                  /**< Max number of coded views minus 1 in video : Range - 0 to 1023              */
+    int view_id;                           /**< view identifier                                                             */
+    unsigned char inter_view_flag;         /**< 1 if used for inter-view prediction, 0 if not                               */
+    unsigned char num_inter_view_refs_l0;  /**< number of inter-view ref pics in RefPicList0                                */
+    unsigned char num_inter_view_refs_l1;  /**< number of inter-view ref pics in RefPicList1                                */
+    unsigned char MVCReserved8Bits;        /**< Reserved bits                                                               */
+    int InterViewRefsL0[16];               /**< view id of the i-th view component for inter-view prediction in RefPicList0 */
+    int InterViewRefsL1[16];               /**< view id of the i-th view component for inter-view prediction in RefPicList1 */
 } CUVIDH264MVCEXT;
 
 /*!
@@ -676,13 +709,15 @@ typedef struct _CUVIDPROCPARAMS
     // The fields below are used for raw YUV input
     unsigned int reserved_flags;        /**< Reserved for future use (set to zero) */
     unsigned int reserved_zero;         /**< Reserved (set to zero) */
-    unsigned long long raw_input_dptr;  /**< Input CUdeviceptr for raw YUV extensions */
-    unsigned int raw_input_pitch;       /**< pitch in bytes of raw YUV input (should be aligned appropriately) */
-    unsigned int raw_input_format;      /**< Reserved for future use (set to zero) */
-    unsigned long long raw_output_dptr; /**< Reserved for future use (set to zero) */
-    unsigned int raw_output_pitch;      /**< Reserved for future use (set to zero) */
-    unsigned int Reserved[48];
-    void *Reserved3[3];
+    unsigned long long raw_input_dptr;  /**< IN: Input CUdeviceptr for raw YUV extensions                               */
+    unsigned int raw_input_pitch;       /**< IN: pitch in bytes of raw YUV input (should be aligned appropriately)      */
+    unsigned int raw_input_format;      /**< IN: Input YUV format (cudaVideoCodec_enum)                                 */
+    unsigned long long raw_output_dptr; /**< IN: Output CUdeviceptr for raw YUV extensions                              */
+    unsigned int raw_output_pitch;      /**< IN: pitch in bytes of raw YUV output (should be aligned appropriately)     */
+    unsigned int Reserved1;             /**< Reserved for future use (set to zero)                                      */
+    CUstream output_stream;             /**< IN: stream object used by cuvidMapVideoFrame                               */
+    unsigned int Reserved[46];          /**< Reserved for future use (set to zero)                                      */
+    void *Reserved2[2];                 /**< Reserved for future use (set to zero)                                      */
 } CUVIDPROCPARAMS;
 
 
@@ -692,6 +727,7 @@ typedef struct _CUVIDPROCPARAMS
  * queue at any time, in order to make sure that all decode engines are always busy.
  *
  * Overall data flow:
+ *  - cuvidGetDecoderCaps(...)
  *  - cuvidCreateDecoder(...)
  *  For each picture:
  *  - cuvidDecodePicture(N)
@@ -710,6 +746,21 @@ typedef struct _CUVIDPROCPARAMS
  * - cuVidDecodePicture may block the calling thread if there are too many pictures pending
  *   in the decode queue
  */
+
+/*!
+ * \fn CUresult CUDAAPI cuvidGetDecoderCaps(CUVIDDECODECAPS *pdc)
+ * Queries decode capabilities of NVDEC-HW based on CodecType, ChromaFormat and BitDepthMinus8 parameters.
+ * 1. Application fills IN parameters CodecType, ChromaFormat and BitDepthMinus8 of CUVIDDECODECAPS structure
+ * 2. On calling cuvidGetDecoderCaps, driver fills OUT parameters if the IN parameters are supported
+ *    If IN parameters passed to the driver are not supported by NVDEC-HW, then all OUT params are set to 0.
+ * E.g. on Geforce GTX 960:
+ *    App fills - eCodecType = cudaVideoCodec_H264; eChromaFormat = cudaVideoChromaFormat_420; nBitDepthMinus8 = 0;
+ *    Given IN parameters are supported, hence driver fills: bIsSupported = 1; nMinWidth   = 48; nMinHeight  = 16;
+ *    nMaxWidth = 4096; nMaxHeight = 4096; nMaxMBCount = 65536;
+ *    CodedWidth*CodedHeight/256 must be less than or equal to nMaxMBCount
+ */
+CUresult CUDAAPI cuvidGetDecoderCaps(CUVIDDECODECAPS *pdc);
+
 
 /**
  * \fn CUresult CUDAAPI cuvidCreateDecoder(CUvideodecoder *phDecoder, CUVIDDECODECREATEINFO *pdci)

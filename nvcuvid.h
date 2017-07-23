@@ -1,7 +1,7 @@
 /*
  * This copyright notice applies to this header file only:
  *
- * Copyright (c) 2010-2016 NVIDIA Corporation
+ * Copyright (c) 2010-2017 NVIDIA Corporation
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -79,7 +79,8 @@ typedef enum {
     cudaAudioCodec_MPEG2,           /**< MPEG-2 Audio  */
     cudaAudioCodec_MP3,             /**< MPEG-1 Layer III Audio  */
     cudaAudioCodec_AC3,             /**< Dolby Digital (AC3) Audio  */
-    cudaAudioCodec_LPCM             /**< PCM Audio  */
+    cudaAudioCodec_LPCM,            /**< PCM Audio  */
+    cudaAudioCodec_AAC,             /**< AAC Audio  */
 } cudaAudioCodec;
 
 /*!
@@ -127,12 +128,12 @@ typedef struct
     * Video Signal Description
     */
     struct {
-        unsigned char video_format          : 3;
-        unsigned char video_full_range_flag : 1;
-        unsigned char reserved_zero_bits    : 4;
-        unsigned char color_primaries;
-        unsigned char transfer_characteristics;
-        unsigned char matrix_coefficients;
+        unsigned char video_format          : 3; /**< OUT: 0-Component, 1-PAL, 2-NTSC, 3-SECAM, 4-MAC, 5-Unspecified     */
+        unsigned char video_full_range_flag : 1; /**< OUT: indicates the black level and luma and chroma range           */
+        unsigned char reserved_zero_bits    : 4; /**< Reserved bits                                                      */
+        unsigned char color_primaries;           /**< OUT: chromaticity coordinates of source primaries                  */
+        unsigned char transfer_characteristics;  /**< OUT: opto-electronic transfer characteristic of the source picture */
+        unsigned char matrix_coefficients;       /**< OUT: used in deriving luma and chroma signals from RGB primaries   */
     } video_signal_description;
     unsigned int seqhdr_data_length;          /**< Additional bytes following (CUVIDEOFORMATEX)  */
 } CUVIDEOFORMAT;
@@ -169,7 +170,8 @@ typedef struct
 typedef enum {
     CUVID_PKT_ENDOFSTREAM   = 0x01,   /**< Set when this is the last packet for this stream  */
     CUVID_PKT_TIMESTAMP     = 0x02,   /**< Timestamp is valid  */
-    CUVID_PKT_DISCONTINUITY = 0x04    /**< Set when a discontinuity has to be signalled  */
+    CUVID_PKT_DISCONTINUITY = 0x04,   /**< Set when a discontinuity has to be signalled  */
+    CUVID_PKT_ENDOFPICTURE  = 0x08,   /**< Set when the packet contains exactly one frame */
 } CUvideopacketflags;
 
 /*!
@@ -257,13 +259,15 @@ CUresult CUDAAPI cuvidGetSourceAudioFormat(CUvideosource obj, CUAUDIOFORMAT *pau
 /**
  * \struct CUVIDPARSERDISPINFO
  */
-typedef struct _CUVIDPARSERDISPINFO
-{
-    int picture_index;         /**<                 */
-    int progressive_frame;     /**<                 */
-    int top_field_first;       /**<                 */
-    int repeat_first_field;    /**< Number of additional fields (1=ivtc, 2=frame doubling, 4=frame tripling, -1=unpaired field)  */
-    CUvideotimestamp timestamp; /**<     */
+typedef struct _CUVIDPARSERDISPINFO {
+    int picture_index;          /**< OUT: Index of the current picture                   */
+    int progressive_frame;      /**< OUT: 1 if progressive frame; 0 otherwise            */
+    int top_field_first;        /**< OUT: 1 if top field is displayed first; 0 otherwise */
+    int repeat_first_field;     /**< OUT: Number of additional fields (1=ivtc,
+                                                                       2=frame doubling,
+                                                                       4=frame tripling,
+                                                                      -1=unpaired field) */
+    CUvideotimestamp timestamp; /**< OUT: Presentation time stamp                        */
 } CUVIDPARSERDISPINFO;
 
 //
