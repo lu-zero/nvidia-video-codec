@@ -12,11 +12,11 @@ The package is tested to work with [Libav](https://libav.org) and [rust-av](http
 
 ## Dependencies
 - Recent NVIDIA drivers
-  - Windows: Driver version 368.69  or higher
-  - Linux:   Driver version 367.35  or higher
+  - Windows: Driver version 397.93  or higher
+  - Linux:   Driver version 396.24 or higher
 
 - Recent [CUDA toolkit][2]
-  - CUDA 7.5
+  - CUDA 8.0
 
 ## Requirements
 
